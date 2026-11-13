@@ -28,6 +28,9 @@ struct DecodedAudioPacket {
     uint8_t channels;
     uint32_t sampleRate;
     uint32_t frameCount;
+    // Unaligned payload byte pointer at data + 47; copy via std::memcpy into aligned float buffer.
+    const uint8_t* planarSampleBytes;
+    // Typed alias to data + 47 matching wire header offset; do not dereference directly when data+47 is unaligned.
     const float* planarSamples;
 };
 
@@ -211,6 +214,7 @@ inline bool decodeAudioPacket(const uint8_t* data, size_t len, DecodedAudioPacke
     out.channels = channels;
     out.sampleRate = sampleRate;
     out.frameCount = frameCount;
+    out.planarSampleBytes = (frameCount > 0) ? (data + kHeaderSize) : nullptr;
     out.planarSamples = (frameCount > 0) ? reinterpret_cast<const float*>(data + kHeaderSize) : nullptr;
 
     return true;

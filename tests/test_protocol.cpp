@@ -76,10 +76,13 @@ void test_encode_layout_matches_mrsr() {
     assert(decoded.channels == 2);
     assert(decoded.sampleRate == 48000);
     assert(decoded.frameCount == 4);
+    assert(decoded.planarSampleBytes != nullptr);
     assert(decoded.planarSamples != nullptr);
+    float decodedSamples[8]{};
+    std::memcpy(decodedSamples, decoded.planarSampleBytes, sizeof(decodedSamples));
     for (int i = 0; i < 4; ++i) {
-        assert(decoded.planarSamples[i] == ch0[i]);
-        assert(decoded.planarSamples[4 + i] == ch1[i]);
+        assert(decodedSamples[i] == ch0[i]);
+        assert(decodedSamples[4 + i] == ch1[i]);
     }
 
     // Also verify non-zero frameOffset
@@ -94,10 +97,11 @@ void test_encode_layout_matches_mrsr() {
     ok = StreamAudio::Protocol::decodeAudioPacket(buf, writtenOffset, decoded);
     assert(ok);
     assert(std::string(decoded.identifier) == "offset_test");
-    assert(decoded.planarSamples[0] == 1.1f);
-    assert(decoded.planarSamples[3] == 1.4f);
-    assert(decoded.planarSamples[4] == 2.1f);
-    assert(decoded.planarSamples[7] == 2.4f);
+    std::memcpy(decodedSamples, decoded.planarSampleBytes, sizeof(decodedSamples));
+    assert(decodedSamples[0] == 1.1f);
+    assert(decodedSamples[3] == 1.4f);
+    assert(decodedSamples[4] == 2.1f);
+    assert(decodedSamples[7] == 2.4f);
 
     std::cout << "[test_protocol] test_encode_layout_matches_mrsr passed!" << std::endl;
 }
@@ -362,10 +366,12 @@ void test_encode_edge_cases() {
     assert(decoded.identifier[31] == '\0');
 
     // Null channelPtrs[1] should be zero-filled
-    assert(decoded.planarSamples[0] == 1.f);
-    assert(decoded.planarSamples[1] == 2.f);
-    assert(decoded.planarSamples[4] == 0.f); // ch1 frame 0
-    assert(decoded.planarSamples[5] == 0.f); // ch1 frame 1
+    float edgeSamples[8]{};
+    std::memcpy(edgeSamples, decoded.planarSampleBytes, sizeof(edgeSamples));
+    assert(edgeSamples[0] == 1.f);
+    assert(edgeSamples[1] == 2.f);
+    assert(edgeSamples[4] == 0.f); // ch1 frame 0
+    assert(edgeSamples[5] == 0.f); // ch1 frame 1
 
     // Capacity too small
     assert(StreamAudio::Protocol::encodeAudioPacket(buf, 46, "test", 2, 48000, 4, channelPtrs, 0) == 0);
