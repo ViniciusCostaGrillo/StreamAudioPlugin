@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
+#include <memory>
 #include <thread>
 #include <vector>
 
@@ -200,74 +201,74 @@ void test_spsc_threaded_producer_consumer() {
 void test_jitter_prebuffer_and_overflow_trim() {
     std::cout << "[test_dsp_buffers] test_jitter_prebuffer_and_overflow_trim..." << std::endl;
 
-    StreamAudio::JitterChannelBuffer jitter;
-    assert(!jitter.isPrebuffered());
-    assert(jitter.bufferedFrames() == 0);
+    auto jitter = std::make_unique<StreamAudio::JitterChannelBuffer>();
+    assert(!jitter->isPrebuffered());
+    assert(jitter->bufferedFrames() == 0);
 
     constexpr size_t BLOCK_FRAMES = 128;
     float block[BLOCK_FRAMES];
 
     // Push 1st block of 128 frames [0..127]
     for (size_t i = 0; i < BLOCK_FRAMES; ++i) block[i] = static_cast<float>(i);
-    jitter.push(block, BLOCK_FRAMES);
+    jitter->push(block, BLOCK_FRAMES);
 
-    assert(jitter.bufferedFrames() == BLOCK_FRAMES);
-    assert(!jitter.isPrebuffered());
+    assert(jitter->bufferedFrames() == BLOCK_FRAMES);
+    assert(!jitter->isPrebuffered());
 
     // popForBlock should return 0 (not prebuffered yet, needs 2 blocks)
     float out[BLOCK_FRAMES] = { 0 };
-    size_t popped = jitter.popForBlock(out, BLOCK_FRAMES);
+    size_t popped = jitter->popForBlock(out, BLOCK_FRAMES);
     assert(popped == 0);
-    assert(!jitter.isPrebuffered());
-    assert(jitter.bufferedFrames() == BLOCK_FRAMES);
+    assert(!jitter->isPrebuffered());
+    assert(jitter->bufferedFrames() == BLOCK_FRAMES);
 
     // Push 2nd block of 128 frames [128..255]
     for (size_t i = 0; i < BLOCK_FRAMES; ++i) block[i] = static_cast<float>(128 + i);
-    jitter.push(block, BLOCK_FRAMES);
+    jitter->push(block, BLOCK_FRAMES);
 
-    assert(jitter.bufferedFrames() == 2 * BLOCK_FRAMES);
+    assert(jitter->bufferedFrames() == 2 * BLOCK_FRAMES);
     // Now buffered >= 2 * BLOCK_FRAMES (256 frames)
 
     // popForBlock should now succeed, set isPrebuffered() = true, and return 1st block [0..127]
-    popped = jitter.popForBlock(out, BLOCK_FRAMES);
+    popped = jitter->popForBlock(out, BLOCK_FRAMES);
     assert(popped == BLOCK_FRAMES);
-    assert(jitter.isPrebuffered());
-    assert(jitter.bufferedFrames() == BLOCK_FRAMES);
+    assert(jitter->isPrebuffered());
+    assert(jitter->bufferedFrames() == BLOCK_FRAMES);
     for (size_t i = 0; i < BLOCK_FRAMES; ++i) {
         assert(out[i] == static_cast<float>(i));
     }
 
     // Next popForBlock returns 2nd block [128..255]
-    popped = jitter.popForBlock(out, BLOCK_FRAMES);
+    popped = jitter->popForBlock(out, BLOCK_FRAMES);
     assert(popped == BLOCK_FRAMES);
-    assert(jitter.bufferedFrames() == 0);
+    assert(jitter->bufferedFrames() == 0);
     for (size_t i = 0; i < BLOCK_FRAMES; ++i) {
         assert(out[i] == static_cast<float>(128 + i));
     }
 
     // Now buffer is empty (complete underrun)
     // Next popForBlock should return 0 and reset prebuffered_ = false!
-    popped = jitter.popForBlock(out, BLOCK_FRAMES);
+    popped = jitter->popForBlock(out, BLOCK_FRAMES);
     assert(popped == 0);
-    assert(!jitter.isPrebuffered());
+    assert(!jitter->isPrebuffered());
 
     // Verify underrun recovery re-arms 2-block prebuffer
-    jitter.push(block, BLOCK_FRAMES);
-    assert(!jitter.isPrebuffered());
-    popped = jitter.popForBlock(out, BLOCK_FRAMES);
+    jitter->push(block, BLOCK_FRAMES);
+    assert(!jitter->isPrebuffered());
+    popped = jitter->popForBlock(out, BLOCK_FRAMES);
     assert(popped == 0); // Still needs 2nd block
 
-    jitter.push(block, BLOCK_FRAMES);
-    popped = jitter.popForBlock(out, BLOCK_FRAMES);
+    jitter->push(block, BLOCK_FRAMES);
+    popped = jitter->popForBlock(out, BLOCK_FRAMES);
     assert(popped == BLOCK_FRAMES);
-    assert(jitter.isPrebuffered());
+    assert(jitter->isPrebuffered());
 
     // Drain remaining block so buffer is clean
-    popped = jitter.popForBlock(out, BLOCK_FRAMES);
+    popped = jitter->popForBlock(out, BLOCK_FRAMES);
     assert(popped == BLOCK_FRAMES);
-    jitter.reset();
-    assert(!jitter.isPrebuffered());
-    assert(jitter.bufferedFrames() == 0);
+    jitter->reset();
+    assert(!jitter->isPrebuffered());
+    assert(jitter->bufferedFrames() == 0);
 
     // --- Overflow Trim Test ---
     // Push > 64 * BLOCK_FRAMES (e.g. 10,000 frames)
@@ -278,8 +279,8 @@ void test_jitter_prebuffer_and_overflow_trim() {
     for (size_t i = 0; i < OVERFLOW_COUNT; ++i) {
         overflowData[i] = static_cast<float>(i);
     }
-    jitter.push(overflowData.data(), OVERFLOW_COUNT);
-    assert(jitter.bufferedFrames() == OVERFLOW_COUNT);
+    jitter->push(overflowData.data(), OVERFLOW_COUNT);
+    assert(jitter->bufferedFrames() == OVERFLOW_COUNT);
 
     // On popForBlock(out, BLOCK_FRAMES):
     // Buffer has 10,000 > 64 * 128 (8192).
@@ -287,21 +288,21 @@ void test_jitter_prebuffer_and_overflow_trim() {
     // Retained range is [1808..9999] (8192 frames).
     // Then it pops BLOCK_FRAMES (128 frames): [1808..1935].
     // Remaining in buffer: 8192 - 128 = 8064 frames.
-    popped = jitter.popForBlock(out, BLOCK_FRAMES);
+    popped = jitter->popForBlock(out, BLOCK_FRAMES);
     assert(popped == BLOCK_FRAMES);
-    assert(jitter.isPrebuffered());
-    assert(jitter.bufferedFrames() == 8192 - BLOCK_FRAMES);
-    assert(jitter.bufferedFrames() <= 64 * BLOCK_FRAMES);
+    assert(jitter->isPrebuffered());
+    assert(jitter->bufferedFrames() == 8192 - BLOCK_FRAMES);
+    assert(jitter->bufferedFrames() <= 64 * BLOCK_FRAMES);
 
     for (size_t i = 0; i < BLOCK_FRAMES; ++i) {
         assert(out[i] == static_cast<float>(1808 + i));
     }
 
     // Safety checks: null dst or 0 frames
-    assert(jitter.popForBlock(nullptr, BLOCK_FRAMES) == 0);
-    assert(jitter.popForBlock(out, 0) == 0);
-    jitter.push(nullptr, 100);
-    jitter.push(block, 0);
+    assert(jitter->popForBlock(nullptr, BLOCK_FRAMES) == 0);
+    assert(jitter->popForBlock(out, 0) == 0);
+    jitter->push(nullptr, 100);
+    jitter->push(block, 0);
 
     std::cout << "  -> passed!" << std::endl;
 }

@@ -16,6 +16,10 @@ namespace StreamAudio {
  * - Zero heap allocations (fixed capacity via std::array).
  * - Zero mutexes or locks (lock-free atomic indices with acquire/release ordering).
  * - Uses power-of-two capacity for fast bitwise modulo operations and full capacity utilization.
+ *
+ * @note When instantiated with large capacities (such as Capacity >= 16384), instances
+ * should be allocated on the heap (e.g. via std::unique_ptr or as a member of a heap-allocated
+ * class) rather than as a local stack variable to avoid thread stack overflow.
  */
 template<size_t Capacity>
 class SpscFloatRing {
@@ -142,11 +146,19 @@ private:
 /**
  * @brief Jitter channel buffer wrapping an SpscFloatRing<131072> (~2.7s @ 48kHz).
  *
+ * WARNING: sizeof(JitterChannelBuffer) is ~512 KB.
+ * This class must NEVER be allocated as a local variable on the thread stack, as it can
+ * cause stack overflow (especially on Windows where default thread stacks are 1 MB).
+ * Always heap-allocate instances (e.g. via std::make_unique<JitterChannelBuffer>() or as a
+ * member of a heap-allocated service/processor object).
+ *
  * Enforces:
  * 1. 2-block initial prebuffer before releasing audio (mitigates network jitter).
- * 2. Automatic trimming of oldest frames when buffered frames exceed 64 * blockFrames.
+ * 2. Automatic trimming of oldest frames on consumer side when buffered frames exceed 64 * blockFrames.
  * 3. Underrun detection: resets prebuffered state on complete underrun so recovery
  *    re-accumulates a 2-block cushion before resuming playback.
+ * 4. Strict SPSC thread safety: producer thread calls push() and only mutates writeIndex;
+ *    consumer thread calls popForBlock() / discard() and only mutates readIndex.
  */
 class JitterChannelBuffer {
 public:
@@ -162,21 +174,11 @@ public:
 
     /**
      * @brief Pushes incoming audio frames into the jitter buffer.
-     * If the buffer overflows its capacity, oldest frames are discarded.
+     * Producer thread only. Safely pushes up to available capacity without
+     * modifying the consumer's readIndex.
      */
     void push(const float* src, size_t count) noexcept {
         if (!src || count == 0) return;
-
-        if (count > RING_CAPACITY) {
-            src += (count - RING_CAPACITY);
-            count = RING_CAPACITY;
-        }
-
-        const size_t avail = ring_.availableWrite();
-        if (count > avail) {
-            ring_.discard(count - avail);
-        }
-
         ring_.push(src, count);
     }
 
