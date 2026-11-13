@@ -1,0 +1,11 @@
+vendor/
+build/
+.worktrees/
+*.exe
+*.o
+*.obj
+*.dll
+*.lib
+*.exp
+*.vst3/
+*.vst3
