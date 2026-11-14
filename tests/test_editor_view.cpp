@@ -222,14 +222,32 @@ int main(int argc, char* argv[]) {
     assert(SendMessageA(hwndEnabled, BM_GETCHECK, 0, 0) == BST_CHECKED && "Enabled checkbox must sync to checked via host param update");
 
     std::cout << "[Step 5] Detaching and removing view" << std::endl;
+    // Test double attached() call guard: must cleanly recreate window without crash or leak
+    tresult attachAgainRes = editorView->attached(parentHwnd, kPlatformTypeHWND);
+    assert(attachAgainRes == kResultOk && "Double attached() call must succeed cleanly");
+    HWND refreshedChild = FindWindowExA(parentHwnd, nullptr, nullptr, nullptr);
+    assert(refreshedChild != nullptr && "Child window must exist after double attached()");
+
     tresult remRes = editorView->removed();
     assert(remRes == kResultOk && "removed() must return kResultOk");
 
     // Check child window was destroyed
-    assert(!IsWindow(childHwnd) && "Child window must be destroyed after removed()");
+    assert(!IsWindow(refreshedChild) && "Child window must be destroyed after removed()");
 
     editorView->release();
     DestroyWindow(parentHwnd);
+
+    std::cout << "[Step 5b] Testing parent HWND destruction before removed() & unsubclassing on WM_NCDESTROY" << std::endl;
+    IPlugView* view2 = controller->createView(ViewType::kEditor);
+    assert(view2 != nullptr);
+    HWND parent2 = CreateWindowExA(0, wc.lpszClassName, "Host Parent 2", WS_POPUP, 150, 150, 420, 260, nullptr, nullptr, wc.hInstance, nullptr);
+    assert(parent2 != nullptr);
+    assert(view2->attached(parent2, kPlatformTypeHWND) == kResultOk);
+    // Destroy parent window hierarchy before calling removed() (simulating abrupt DAW window close)
+    DestroyWindow(parent2);
+    // Now call removed() and release() - must handle destroyed HWND safely without crash or leak
+    assert(view2->removed() == kResultOk);
+    view2->release();
 
     std::cout << "[Step 6] Clean host teardown" << std::endl;
     assert(component->terminate() == kResultOk);

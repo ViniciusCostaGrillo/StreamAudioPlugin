@@ -33,11 +33,7 @@ Win32EditorView::Win32EditorView(StreamAudioPlugin* plugin)
 }
 
 Win32EditorView::~Win32EditorView() {
-    if (hwnd_) {
-        KillTimer(hwnd_, kTimerId);
-        DestroyWindow(hwnd_);
-        hwnd_ = nullptr;
-    }
+    Win32EditorView::removed();
     cleanupGdi();
     if (plugin_) {
         plugin_->release();
@@ -152,6 +148,15 @@ LRESULT CALLBACK Win32EditorView::editSubclassProc(HWND hwnd, UINT uMsg, WPARAM 
         }
         return 0;
     }
+    if (uMsg == WM_NCDESTROY) {
+        if (origProc) {
+            SetWindowLongPtrA(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(origProc));
+            RemovePropA(hwnd, "OrigWndProc");
+            return CallWindowProcA(origProc, hwnd, uMsg, wParam, lParam);
+        }
+        RemovePropA(hwnd, "OrigWndProc");
+        return DefWindowProcA(hwnd, uMsg, wParam, lParam);
+    }
     if (origProc) {
         return CallWindowProcA(origProc, hwnd, uMsg, wParam, lParam);
     }
@@ -169,6 +174,15 @@ LRESULT CALLBACK Win32EditorView::comboEditSubclassProc(HWND hwnd, UINT uMsg, WP
             }
         }
         return 0;
+    }
+    if (uMsg == WM_NCDESTROY) {
+        if (origProc) {
+            SetWindowLongPtrA(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(origProc));
+            RemovePropA(hwnd, "OrigWndProc");
+            return CallWindowProcA(origProc, hwnd, uMsg, wParam, lParam);
+        }
+        RemovePropA(hwnd, "OrigWndProc");
+        return DefWindowProcA(hwnd, uMsg, wParam, lParam);
     }
     if (origProc) {
         return CallWindowProcA(origProc, hwnd, uMsg, wParam, lParam);
@@ -429,9 +443,7 @@ void Win32EditorView::onPaint(HWND hwnd) {
     HBITMAP oldBmp = static_cast<HBITMAP>(SelectObject(memDC, memBmp));
 
     // 1. Fill main background (#181A1F)
-    HBRUSH bgBrush = CreateSolidBrush(RGB(0x18, 0x1A, 0x1F));
-    FillRect(memDC, &clientRect, bgBrush);
-    DeleteObject(bgBrush);
+    FillRect(memDC, &clientRect, hBgBrush_);
 
     // 2. Draw Header
     HFONT oldFont = static_cast<HFONT>(SelectObject(memDC, hFontTitle_));
@@ -750,6 +762,10 @@ Steinberg::tresult PLUGIN_API Win32EditorView::attached(void* parent, Steinberg:
         return Steinberg::kInvalidArgument;
     }
 
+    if (hwnd_) {
+        Win32EditorView::removed();
+    }
+
     CPluginView::attached(parent, type);
 
     HWND parentHwnd = reinterpret_cast<HWND>(parent);
@@ -801,11 +817,20 @@ Steinberg::tresult PLUGIN_API Win32EditorView::removed() {
                 SetWindowLongPtrA(hwndIdentifier_, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(orig));
             }
             RemovePropA(hwndIdentifier_, "OrigWndProc");
+            hwndIdentifier_ = nullptr;
         }
 
         DestroyWindow(hwnd_);
         hwnd_ = nullptr;
     }
+
+    hwndEnabled_ = nullptr;
+    hwndSend_ = nullptr;
+    hwndReceive_ = nullptr;
+    hwndIdentifier_ = nullptr;
+    hwndDestination_ = nullptr;
+    hwndChannels_ = nullptr;
+    hwndDestEdit_ = nullptr;
 
     return CPluginView::removed();
 }
