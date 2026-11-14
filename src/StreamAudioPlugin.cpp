@@ -1,4 +1,5 @@
 #include "StreamAudioPlugin.h"
+#include "Win32EditorView.h"
 
 #include <algorithm>
 #include <cmath>
@@ -193,7 +194,10 @@ tresult PLUGIN_API StreamAudioPlugin::setParamNormalized(ParamID tag, ParamValue
     return kResultOk;
 }
 
-IPlugView* PLUGIN_API StreamAudioPlugin::createView(FIDString /*name*/) {
+IPlugView* PLUGIN_API StreamAudioPlugin::createView(FIDString name) {
+    if (name && std::strcmp(name, ViewType::kEditor) == 0) {
+        return new Win32EditorView(this);
+    }
     return nullptr;
 }
 

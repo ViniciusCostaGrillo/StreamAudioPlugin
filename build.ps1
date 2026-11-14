@@ -87,7 +87,8 @@ function Build-Plugin {
     $PluginSources = @(
         "StreamAudioPlugin.cpp",
         "PluginFactory.cpp",
-        "UdpService.cpp"
+        "UdpService.cpp",
+        "Win32EditorView.cpp"
     )
 
     $PluginObjs = @()
@@ -110,7 +111,7 @@ function Build-Plugin {
     $AllObjs = $SdkObjs + $PluginObjs
 
     Write-Host "Linking $PluginDll..."
-    & clang++ -shared @AllObjs $DefFile -lws2_32 -liphlpapi -lole32 -luuid -o $PluginDll
+    & clang++ -shared @AllObjs $DefFile -lws2_32 -liphlpapi -lole32 -luuid -lgdi32 -luser32 -o $PluginDll
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Plugin linking failed with exit code $LASTEXITCODE"
         exit $LASTEXITCODE
@@ -177,12 +178,61 @@ switch ($Mode) {
         & $TestHostExe
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-        Write-Host "=== [build.ps1] ALL 4 TEST SUITES PASSED SUCCESSFULLY! ===" -ForegroundColor Green
+        Write-Host "=== [build.ps1] Running test_editor_view ===" -ForegroundColor Cyan
+        $TestEditorSrc = Join-Path $TestsDir "test_editor_view.cpp"
+        $TestEditorExe = Join-Path $BuildDir "test_editor_view.exe"
+        & clang++ @ClangCommonFlags -Wno-format $TestEditorSrc -lole32 -luuid -lgdi32 -luser32 -o $TestEditorExe
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        & $TestEditorExe
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+        Write-Host "=== [build.ps1] ALL 5 TEST SUITES PASSED SUCCESSFULLY! ===" -ForegroundColor Green
     }
     "plugin" {
         Build-Plugin
     }
     "install" {
-        Write-Host "=== [build.ps1] Mode: install (stub for Task 6) ===" -ForegroundColor Yellow
+        Build-Plugin
+
+        $TargetBundle = "C:\Program Files\Common Files\VST3\StreamAudioPlugin.vst3"
+        $SourceBundle = Join-Path $BuildDir "StreamAudioPlugin.vst3"
+        Write-Host "=== [build.ps1] Installing plugin to $TargetBundle ===" -ForegroundColor Cyan
+        if (Test-Path $TargetBundle) {
+            Remove-Item -Recurse -Force -Path $TargetBundle
+        }
+        Copy-Item -Recurse -Force -Path $SourceBundle -Destination $TargetBundle
+
+        $InstalledDll = Join-Path $TargetBundle "Contents\x86_64-win\StreamAudioPlugin.vst3"
+        if (-not (Test-Path $InstalledDll)) {
+            Write-Error "Installed plugin DLL not found at $InstalledDll"
+            exit 1
+        }
+
+        Write-Host "=== [build.ps1] Verifying installed plugin via test_vst3_host.exe ===" -ForegroundColor Cyan
+        $TestHostSrc = Join-Path $TestsDir "test_vst3_host.cpp"
+        $TestHostExe = Join-Path $BuildDir "test_vst3_host.exe"
+        if (-not (Test-Path $TestHostExe)) {
+            & clang++ @ClangCommonFlags -Wno-format $TestHostSrc -lole32 -luuid -o $TestHostExe
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        }
+        & $TestHostExe $InstalledDll
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Verification of installed plugin failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+
+        Write-Host "=== [build.ps1] Verifying installed plugin via test_editor_view.exe ===" -ForegroundColor Cyan
+        $TestEditorSrc = Join-Path $TestsDir "test_editor_view.cpp"
+        $TestEditorExe = Join-Path $BuildDir "test_editor_view.exe"
+        if (-not (Test-Path $TestEditorExe)) {
+            & clang++ @ClangCommonFlags -Wno-format $TestEditorSrc -lole32 -luuid -lgdi32 -luser32 -o $TestEditorExe
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        }
+        & $TestEditorExe $InstalledDll
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Verification of installed editor view failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+        Write-Host "=== [build.ps1] Plugin successfully installed and verified! ===" -ForegroundColor Green
     }
 }

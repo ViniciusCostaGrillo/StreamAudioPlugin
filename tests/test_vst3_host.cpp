@@ -30,10 +30,13 @@ typedef bool (*InitDllFunc)();
 typedef bool (*ExitDllFunc)();
 typedef IPluginFactory* (PLUGIN_API *GetPluginFactoryFunc)();
 
-int main() {
+int main(int argc, char* argv[]) {
     std::cout << "=== [test_vst3_host] Running VST3 host harness tests ===" << std::endl;
 
     const char* dllPath = "build/StreamAudioPlugin.vst3/Contents/x86_64-win/StreamAudioPlugin.vst3";
+    if (argc > 1 && argv[1] && argv[1][0] != '\0') {
+        dllPath = argv[1];
+    }
     std::cout << "[Step 1] Loading plugin DLL: " << dllPath << std::endl;
 
     HMODULE hMod = LoadLibraryA(dllPath);
