@@ -176,6 +176,75 @@ int main() {
     assert(plugin1->getHostSampleRate() == 48000.0);
     assert(plugin1->getLastSampleRate() == 48000);
 
+    std::cout << "  Testing idempotent setActive calls..." << std::endl;
+    // Instance 1 is currently active: calling setActive(true) repeatedly must be idempotent
+    assert(component->setActive(true) == kResultOk);
+    assert(component->setActive(true) == kResultOk);
+    assert(plugin1->isActive() == true);
+
+    // Create a fresh third instance to test inactive setActive(false)
+    IComponent* comp3 = nullptr;
+    assert(factory->createInstance(StreamAudio::kProcessorUID, IComponent::iid, reinterpret_cast<void**>(&comp3)) == kResultOk);
+    assert(comp3->initialize(nullptr) == kResultOk);
+    auto* plugin3 = static_cast<StreamAudio::StreamAudioPlugin*>(comp3);
+    assert(plugin3->isActive() == false);
+
+    // Repeated setActive(false) on fresh inactive instance while instance 1 is active
+    assert(comp3->setActive(false) == kResultOk);
+    assert(comp3->setActive(false) == kResultOk);
+    assert(plugin3->isActive() == false);
+    assert(plugin1->isActive() == true);
+
+    // Activate comp3, repeated setActive(true), then deactivate comp3
+    assert(comp3->setActive(true) == kResultOk);
+    assert(comp3->setActive(true) == kResultOk);
+    assert(plugin3->isActive() == true);
+    assert(comp3->setActive(false) == kResultOk);
+    assert(comp3->setActive(false) == kResultOk);
+    assert(plugin3->isActive() == false);
+    assert(comp3->terminate() == kResultOk);
+    comp3->release();
+
+    // Verify instance 1 remains active and unaffected
+    assert(plugin1->isActive() == true);
+
+    std::cout << "  Testing large block chunking (numSamples = 2560 > 2048)..." << std::endl;
+    constexpr int32 kBigNumSamples = 2560;
+    std::vector<float> bigInL(kBigNumSamples, 0.42f);
+    std::vector<float> bigInR(kBigNumSamples, 0.84f);
+    std::vector<float> bigOutL(kBigNumSamples, 0.0f);
+    std::vector<float> bigOutR(kBigNumSamples, 0.0f);
+    float* bigInPtrs[2] = { bigInL.data(), bigInR.data() };
+    float* bigOutPtrs[2] = { bigOutL.data(), bigOutR.data() };
+    AudioBusBuffers bigInBus{};
+    bigInBus.numChannels = 2;
+    bigInBus.channelBuffers32 = bigInPtrs;
+    AudioBusBuffers bigOutBus{};
+    bigOutBus.numChannels = 2;
+    bigOutBus.channelBuffers32 = bigOutPtrs;
+
+    ProcessData bigData{};
+    bigData.processMode = kRealtime;
+    bigData.symbolicSampleSize = kSample32;
+    bigData.numSamples = kBigNumSamples;
+    bigData.numInputs = 1;
+    bigData.inputs = &bigInBus;
+    bigData.numOutputs = 1;
+    bigData.outputs = &bigOutBus;
+
+    assert(processor->process(bigData) == kResultOk);
+    for (int32 i = 0; i < kBigNumSamples; ++i) {
+        assert(bigOutL[i] == bigInL[i]);
+        assert(bigOutR[i] == bigInR[i]);
+    }
+
+    // Test with null channel pointer when numSamples > 2048 to exercise chunk offset null check
+    std::cout << "  Testing Send mode chunking with null channel buffer (numSamples = 2560)..." << std::endl;
+    float* nullChannelPtrs[2] = { bigInL.data(), nullptr };
+    bigInBus.channelBuffers32 = nullChannelPtrs;
+    assert(processor->process(bigData) == kResultOk);
+    bigInBus.channelBuffers32 = bigInPtrs; // restore
+
     std::cout << "[Step 3] Testing host edge cases" << std::endl;
     // 3a. numSamples == 0
     data.numSamples = 0;

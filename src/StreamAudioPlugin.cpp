@@ -23,7 +23,7 @@ StreamAudioPlugin::StreamAudioPlugin() {
 }
 
 StreamAudioPlugin::~StreamAudioPlugin() {
-    if (txSlot_ || rxSlot_) {
+    if (active_) {
         setActive(false);
     }
 }
@@ -70,21 +70,39 @@ tresult PLUGIN_API StreamAudioPlugin::initialize(FUnknown* context) {
 }
 
 tresult PLUGIN_API StreamAudioPlugin::terminate() {
-    if (txSlot_ || rxSlot_) {
+    if (active_) {
         setActive(false);
     }
     return SingleComponentEffect::terminate();
 }
 
 tresult PLUGIN_API StreamAudioPlugin::setActive(TBool state) {
-    if (state) {
-        UdpService::instance().acquire();
-        if (!txSlot_) {
-            txSlot_ = UdpService::instance().createSender();
+    const bool requestedActive = (state != 0);
+    if (requestedActive == active_) {
+        return kResultOk;
+    }
+
+    tresult res = SingleComponentEffect::setActive(state);
+    if (res != kResultOk) {
+        return res;
+    }
+
+    if (requestedActive) {
+        if (!UdpService::instance().acquire()) {
+            return kResultFalse;
         }
-        if (!rxSlot_) {
-            rxSlot_ = UdpService::instance().createReceiver(identifier_);
+        txSlot_ = UdpService::instance().createSender();
+        rxSlot_ = UdpService::instance().createReceiver(identifier_);
+
+        const double hostSr = hostSampleRate_.load(std::memory_order_relaxed);
+        const double effectiveHostSr = hostSr > 0.0 ? hostSr : 48000.0;
+        for (size_t ch = 0; ch < 8; ++ch) {
+            rxResamplers_[ch].reset(effectiveHostSr, effectiveHostSr);
+            if (rxJitterBuffers_[ch]) {
+                rxJitterBuffers_[ch]->reset();
+            }
         }
+        active_ = true;
     } else {
         if (txSlot_) {
             UdpService::instance().destroySender(txSlot_);
@@ -95,6 +113,13 @@ tresult PLUGIN_API StreamAudioPlugin::setActive(TBool state) {
             rxSlot_ = nullptr;
         }
         UdpService::instance().release();
+
+        for (size_t ch = 0; ch < 8; ++ch) {
+            if (rxJitterBuffers_[ch]) {
+                rxJitterBuffers_[ch]->reset();
+            }
+        }
+        active_ = false;
     }
     return kResultOk;
 }
@@ -403,7 +428,7 @@ tresult PLUGIN_API StreamAudioPlugin::process(ProcessData& data) {
             readIdentifierLockFree(idBuf);
             const uint32_t destIpNet = destIpNet_.load(std::memory_order_relaxed);
             const uint8_t configuredCh = static_cast<uint8_t>(std::clamp(channels_.load(std::memory_order_relaxed), 1, 8));
-            const uint8_t sendChannels = static_cast<uint8_t>(std::min(static_cast<int32>(configuredCh), numInChannels));
+            const uint8_t sendChannels = static_cast<uint8_t>(std::clamp(std::min(static_cast<int32>(configuredCh), numInChannels), 0, 8));
 
             if (sendChannels > 0) {
                 const uint32_t hostSr = static_cast<uint32_t>(hostSampleRate_.load(std::memory_order_relaxed));
@@ -413,18 +438,29 @@ tresult PLUGIN_API StreamAudioPlugin::process(ProcessData& data) {
                 for (int32 offset = 0; offset < totalSamples; offset += kProcessChunkMax) {
                     const int32 chunkFrames = std::min(kProcessChunkMax, totalSamples - offset);
                     const float* chunkPtrs[8] = {nullptr};
+                    bool hasNullChannel = false;
                     for (uint8_t ch = 0; ch < sendChannels; ++ch) {
-                        chunkPtrs[ch] = data.inputs[0].channelBuffers32[ch] + offset;
+                        const float* inBuf = (ch < numInChannels && data.inputs[0].channelBuffers32)
+                            ? data.inputs[0].channelBuffers32[ch]
+                            : nullptr;
+                        if (!inBuf) {
+                            hasNullChannel = true;
+                            chunkPtrs[ch] = nullptr;
+                        } else {
+                            chunkPtrs[ch] = inBuf + offset;
+                        }
                     }
-                    UdpService::instance().tryPushSendAudio(
-                        txSlot_,
-                        idBuf,
-                        destIpNet,
-                        sendChannels,
-                        sr,
-                        static_cast<uint32_t>(chunkFrames),
-                        chunkPtrs
-                    );
+                    if (!hasNullChannel) {
+                        UdpService::instance().tryPushSendAudio(
+                            txSlot_,
+                            idBuf,
+                            destIpNet,
+                            sendChannels,
+                            sr,
+                            static_cast<uint32_t>(chunkFrames),
+                            chunkPtrs
+                        );
+                    }
                 }
             }
         }

@@ -89,10 +89,14 @@ public:
     bool isRxActive() const noexcept;
     uint32_t getLastSampleRate() const noexcept { return lastSampleRate_.load(std::memory_order_relaxed); }
     double getHostSampleRate() const noexcept { return hostSampleRate_.load(std::memory_order_relaxed); }
+    bool isActive() const noexcept { return active_; }
 
 private:
     void readIdentifierLockFree(char out[32]) const noexcept;
     void updatePeaks(float** channelBuffers, Steinberg::int32 numChannels, Steinberg::int32 numSamples) noexcept;
+
+    // Component lifecycle state
+    bool active_{false};
 
     // Config fields (persisted)
     char identifier_[32]{"default"};
